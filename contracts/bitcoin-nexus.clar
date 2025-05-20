@@ -363,3 +363,89 @@
     (ok avatar-id)
   )
 )
+
+(define-public (update-avatar-experience
+    (avatar-id uint)
+    (experience-gained uint)
+  )
+  (let (
+      (current-metadata (unwrap! (get-avatar-details avatar-id) ERR-INVALID-AVATAR))
+      (avatar-owner (unwrap! (nft-get-owner? nexus-avatar avatar-id) ERR-INVALID-AVATAR))
+      (current-level (get level current-metadata))
+      (current-experience (get experience current-metadata))
+    )
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (<= avatar-id (var-get total-avatars)) ERR-INVALID-AVATAR)
+    (asserts! (> experience-gained u0) ERR-INVALID-INPUT)
+    (asserts! (< current-level MAX-LEVEL) ERR-MAX-LEVEL-REACHED)
+    (asserts!
+      (validate-experience-gain current-experience experience-gained
+        current-level
+      )
+      ERR-MAX-EXPERIENCE-REACHED
+    )
+    (let (
+        (new-experience (+ current-experience experience-gained))
+        (should-level-up (can-level-up current-experience experience-gained current-level))
+        (new-level (if should-level-up
+          (+ current-level u1)
+          current-level
+        ))
+      )
+      (asserts! (or (not should-level-up) (<= new-level MAX-LEVEL))
+        ERR-MAX-LEVEL-REACHED
+      )
+      (map-set avatar-metadata { avatar-id: avatar-id }
+        (merge current-metadata {
+          experience: new-experience,
+          level: new-level,
+        })
+      )
+      (ok should-level-up)
+    )
+  )
+)
+
+;; World Management
+
+(define-public (create-game-world
+    (name (string-ascii 50))
+    (description (string-ascii 200))
+    (entry-requirement uint)
+  )
+  (let ((world-id (+ (var-get total-worlds) u1)))
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-name name) ERR-INVALID-NAME)
+    (asserts! (is-valid-description description) ERR-INVALID-DESCRIPTION)
+    (asserts! (>= entry-requirement u0) ERR-INVALID-INPUT)
+    (map-set game-worlds { world-id: world-id } {
+      name: name,
+      description: description,
+      entry-requirement: entry-requirement,
+      active-players: u0,
+      total-rewards: u0,
+    })
+    (var-set total-worlds world-id)
+    (ok world-id)
+  )
+)
+
+;; Leaderboard Management
+
+(define-public (update-player-score
+    (player principal)
+    (new-score uint)
+  )
+  (let ((current-stats (unwrap! (map-get? leaderboard { player: player }) ERR-PLAYER-NOT-FOUND)))
+    (asserts! (is-protocol-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-principal player) ERR-INVALID-INPUT)
+    (asserts! (and (>= new-score u0) (<= new-score u10000)) ERR-INVALID-SCORE)
+    (map-set leaderboard { player: player }
+      (merge current-stats {
+        score: new-score,
+        games-played: (+ (get games-played current-stats) u1),
+      })
+    )
+    (ok true)
+  )
+)
